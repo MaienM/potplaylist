@@ -1,62 +1,80 @@
-import curses
+import os
 import sys
 
 from dl_wrapper import DLWrapper
+from unbuffered import Unbuffered
 
-def main(urls):
-    playlists = []
+def main(args):
     output = []
-    processed = []
+    processed_playlist_titles = []
+    processed_video_ids = []
     index = 1
 
-    curses.setupterm(fd=sys.stdout.fileno())
-    EL = curses.tigetstr('el') or '\r'
+    def on_playlist_start(event):
+        title = event['title']
+        processed_playlist_titles.append(title)
+        print('Scanning playlist "{}"'.format(title), end='')
 
-    def event_playlist(event):
-        if event['number'] == 1:
-            print('Scanning playlist', end='')
-        print('.', end='')
+    def on_playlist_progress(event):
+        print('.', end='', flush=True)
 
-    def event_video(event):
+    def on_playlist_end(event):
+        print()
+
+    def on_video_progress(event):
         nonlocal index
 
-        if event['number'] < event['total']:
-            print(EL + 'Getting video info ({}/{})'.format(event['number'] + 1, event['total']), end='')
-        else:
-            print()
-            print('Done with playlist')
-            print()
+        # Progress indicator
+        print('Got video info ({number}/{total}) - {title}'.format(**event))
 
-        info = event['data']
-        if event['number'] == 1:
-            playlists.append(info['playlist'])
-
-        if info['id'] in processed:
+        # Prevent duplicate videos
+        if event['id'] in processed_video_ids:
             return
-        processed.append(info['id'])
+        processed_video_ids.append(event['id'])
 
-        info['index'] = index
-        output.append('{index}*title*{title}'.format(**info))
-        output.append('{index}*thumbnail*{thumbnail}'.format(**info))
-        output.append('{index}*duration2*{duration}123'.format(**info))
-        output.append('{index}*file*{url}'.format(**info))
+        # Store info in the output cache
+        event['index'] = index
+        output.append('{index}*title*{title}'.format(**event))
+        output.append('{index}*thumbnail*{thumbnail}'.format(**event))
+        output.append('{index}*duration2*{duration}123'.format(**event))
+        output.append('{index}*file*{url}'.format(**event))
         index += 1
 
+    def on_video_end(event):
+        print('Done with playlist')
+        print()
+
     dl = DLWrapper()
-    dl.add_playlist_callback(event_playlist)
-    dl.add_video_callback(event_video)
+    dl.on('playlist.start', on_playlist_start)
+    dl.on('playlist.progress', on_playlist_progress)
+    dl.on('playlist.end', on_playlist_end)
+    dl.on('video.progress', on_video_progress)
+    dl.on('video.end', on_video_end)
 
-    for url in urls:
-        print('Processing {}'.format(url))
-        dl.process(url)
+    for arg in args:
+        if ' ' in arg:
+            url_args = arg.split(' ')
+            url, url_args = url_args[0], url_args[1:]
+        else:
+            url = arg
+            url_args = []
 
+        print('Processing {}'.format(arg))
+        print('Url: {}'.format(url))
+        print('Args: {}'.format(url_args))
+
+        dl.process(url, *url_args)
+
+    # Write playlist with header
     output = [
         'DAUMPLAYLIST',
-        'playname={}'.format(' + '.join(playlists)),
+        'playname={}'.format(' + '.join(processed_playlist_titles)),
     ] + output + ['']
-    print('Writing playlist.dpl')
+    print('Writing {} video(s) to playlist.dpl'.format(len(processed_video_ids)))
     with open('playlist.dpl', 'w') as f:
-        f.write('\n'.join(output))
+        f.write('\n'.join(output).encode(f.encoding, errors='replace').decode(f.encoding))
 
 if __name__ == '__main__':
+    # Unbuffered output
+    sys.stdout = Unbuffered(sys.stdout)
     main(sys.argv[1:])
