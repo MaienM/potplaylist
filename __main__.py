@@ -1,5 +1,6 @@
 import os
 import sys
+import shlex
 
 from dl_wrapper import DLWrapper
 from unbuffered import Unbuffered
@@ -9,6 +10,7 @@ def main(args):
     processed_playlist_titles = []
     processed_video_ids = []
     index = 1
+    filename = 'playlist.dpl'
 
     def on_playlist_start(event):
         title = event['title']
@@ -51,9 +53,12 @@ def main(args):
     dl.on('video.progress', on_video_progress)
     dl.on('video.end', on_video_end)
 
+    if args[-1].endswith('.dpl'):
+        filename = args.pop()
+
     for arg in args:
         if ' ' in arg:
-            url_args = arg.split(' ')
+            url_args = shlex.split(arg)
             url, url_args = url_args[0], url_args[1:]
         else:
             url = arg
@@ -70,8 +75,8 @@ def main(args):
         'DAUMPLAYLIST',
         'playname={}'.format(' + '.join(processed_playlist_titles)),
     ] + output + ['']
-    print('Writing {} video(s) to playlist.dpl'.format(len(processed_video_ids)))
-    with open('playlist.dpl', 'w') as f:
+    print('Writing {} video(s) to {}'.format(len(processed_video_ids), filename))
+    with open(filename, 'w') as f:
         f.write('\n'.join(output).encode(f.encoding, errors='replace').decode(f.encoding))
 
 if __name__ == '__main__':
